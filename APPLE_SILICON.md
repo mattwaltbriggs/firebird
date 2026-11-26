@@ -35,10 +35,13 @@ The `experimental` branch adds optional profiling and three AArch64 JIT fixes:
   counts and the most common untranslated ARM opcodes when emulation stops.
 - Non-S `UMULL`, `UMLAL`, `SMULL` and `SMLAL` are translated with AArch64
   `UMADDL`/`SMADDL`; S-flag variants still fall back to the interpreter.
+  Note that ARM's long-multiply `U` bit is 1 for signed and 0 for unsigned.
 - Non-S register-shifted ARM data-processing instructions are translated by
   materializing the barrel-shifter result first; S-flag variants still fall back.
 - Cached JIT stores now call `write_action()` when write flags are set, restoring
-  write-breakpoint and self-modifying-code handling on AArch64.
+  write-breakpoint and self-modifying-code handling on AArch64. Invalidating the
+  currently executing block is allowed instead of raising an error, because
+  cached stores can now trigger that path from inside JIT code.
 
 Build the instrumented variant with:
 

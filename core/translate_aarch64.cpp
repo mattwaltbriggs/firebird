@@ -324,7 +324,9 @@ void translate(uint32_t pc_start, uint32_t *insn_ptr_start)
 						goto unimpl; // RdLo == RdHi is unpredictable
 
 					// Ra and Rd are x0; sources are the mapped ARM registers.
-					uint32_t instruction = (i.mult.u ? 0x9BA00000 : 0x9B200000)
+					// ARM's U bit is 1 for signed and 0 for unsigned long
+					// multiplies, so select SMADDL/UMADDL accordingly.
+					uint32_t instruction = (i.mult.u ? 0x9B200000 : 0x9BA00000)
 					                     | (mapreg(i.mult.rm) << 16)
 					                     | (mapreg(i.mult.rs) << 5);
 					if(i.mult.a)
@@ -930,15 +932,14 @@ void translate(uint32_t pc_start, uint32_t *insn_ptr_start)
 
 static void _invalidate_translation(int index)
 {
-	// Don't invalidate the block we're currently executing (x86_64 does the same).
-	uint32_t *cur = reinterpret_cast<uint32_t*>(try_ptr(arm.reg[15]));
-	if(cur)
-	{
-		uint32_t flags = RAM_FLAGS(cur);
-		if((flags & RF_CODE_TRANSLATED)
-		   && int(flags >> RFS_TRANSLATION_INDEX) == index)
-			error("Cannot modify currently executing code block.");
-	}
+	/* Don't error when invalidating the currently executing block. Cached
+	   JIT stores call write_action() now, and translation_pc_ptr is
+	   inaccurate due to translation_jmp anyway.
+
+	uint32_t flags = RAM_FLAGS(translation_pc_ptr);
+	if ((flags & RF_CODE_TRANSLATED) && (int)(flags >> RFS_TRANSLATION_INDEX) == index)
+		error("Cannot modify currently executing code block.");
+	*/
 
 	uint32_t *start = translation_table[index].start_ptr;
 	uint32_t *end   = translation_table[index].end_ptr;
