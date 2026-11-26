@@ -1,6 +1,7 @@
 #include "cpu.h"
 #include "cpudefs.h"
 #include "mmu.h"
+#include "translation_stats.h"
 
 void do_cp15_mrc(uint32_t insn)
 {
@@ -60,18 +61,21 @@ void do_cp15_mrc(uint32_t insn)
         arm.reg[insn >> 12 & 15] = value;
 }
 
-static void cp15_addr_cache_flush()
+static void cp15_addr_cache_flush(bool flush_jit = true)
 {
-    #ifndef SUPPORT_LINUX
-        /* The OS does something incredibly stupid: For every access to the flash,
-         * it disables the MMU and flushes all buffers and caches. Argh.
-         * This causes us to drop all translations, so work around this by ignoring
-         * flushes triggered by the flash access code, which is run in SRAM. */
-         if (arm.reg[15] >> 24 == 0xa4)
-             return;
-    #endif
+    /* The OS does something incredibly stupid: For every access to the flash,
+     * it disables the MMU and flushes all buffers and caches. Argh.
+     * This causes us to drop all translations, so work around this by ignoring
+     * flushes triggered by the flash access code, which is run in SRAM. */
+    if (arm.reg[15] >> 24 == 0xa4) {
+        STAT_INC(stat_flush_sram_skipped);
+        return;
+    }
 
-   addr_cache_flush();
+    if (flush_jit)
+        addr_cache_flush();
+    else
+        addr_cache_flush_no_translate();
 }
 
 void do_cp15_mcr(uint32_t insn)
@@ -83,16 +87,20 @@ void do_cp15_mcr(uint32_t insn)
             if ((value & 0xFFFF8CF0) != 0x00050070)
                 error("Bad or unimplemented control register value: %x (unsupported: %x)\n", value, (value & 0xFFFF8CF8) ^ 0x00050078);
             arm.control = value;
-            if (change & 1) // MMU is being turned on or off
+            if (change & 1) { // MMU is being turned on or off
+                STAT_INC(stat_flush_ctrl);
                 cp15_addr_cache_flush();
+            }
             break;
         }
         case 0x020000: /* MCR p15, 0, <Rd>, c2, c0, 0: Translation Table Base Register */
             arm.translation_table_base = value & ~0x3FFF;
+            STAT_INC(stat_flush_ttb);
             cp15_addr_cache_flush();
             break;
         case 0x030000: /* MCR p15, 0, <Rd>, c3, c0, 0: Domain Access Control Register */
             arm.domain_access_control = value;
+            STAT_INC(stat_flush_domain);
             cp15_addr_cache_flush();
             break;
         case 0x050000: /* MCR p15, 0, <Rd>, c5, c0, 0: Data Fault Status Register */
@@ -118,7 +126,8 @@ void do_cp15_mcr(uint32_t insn)
         case 0x070005: /* MCR p15, 0, <Rd>, c7, c5, 0: Invalidate ICache */
         case 0x070025: /* MCR p15, 0, <Rd>, c7, c5, 1: Invalidate ICache line */
         case 0x070007: /* MCR p15, 0, <Rd>, c7, c7, 0: Invalidate ICache and DCache */
-            cp15_addr_cache_flush();
+            STAT_INC(stat_flush_cacheops);
+            cp15_addr_cache_flush(false);
             break;
 
         case 0x080006: /* MCR p15, 0, <Rd>, c8, c6, 0: Invalidate data TLB */
@@ -130,7 +139,8 @@ void do_cp15_mcr(uint32_t insn)
         case 0x0F0000: /* MCR p15, 0, <Rd>, c15, c0, 0: Debug Override Register */
             #ifdef SUPPORT_LINUX
                 // Normally ignored, but somehow needed for linux to boot correctly
-                cp15_addr_cache_flush();
+                STAT_INC(stat_flush_debug);
+                cp15_addr_cache_flush(false);
             #endif
             break;
         default:

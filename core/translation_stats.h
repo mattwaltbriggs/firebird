@@ -16,6 +16,17 @@ extern uint64_t stat_thumb_interp_insns   __asm__("stat_thumb_interp_insns");
 extern uint64_t stat_translation_entries  __asm__("stat_translation_entries");
 extern uint64_t stat_unimpl_total         __asm__("stat_unimpl_total");
 extern uint64_t stat_unimpl_by_key[STAT_UNIMP_KEYS] __asm__("stat_unimpl_by_key");
+extern uint64_t stat_write_action_calls   __asm__("stat_write_action_calls");
+extern uint64_t stat_write_action_invals  __asm__("stat_write_action_invals");
+extern uint64_t stat_flush_translations   __asm__("stat_flush_translations");
+extern uint64_t stat_translations_created __asm__("stat_translations_created");
+extern uint64_t stat_translation_insns    __asm__("stat_translation_insns");
+extern uint64_t stat_flush_ctrl           __asm__("stat_flush_ctrl");
+extern uint64_t stat_flush_ttb            __asm__("stat_flush_ttb");
+extern uint64_t stat_flush_domain         __asm__("stat_flush_domain");
+extern uint64_t stat_flush_cacheops       __asm__("stat_flush_cacheops");
+extern uint64_t stat_flush_debug          __asm__("stat_flush_debug");
+extern uint64_t stat_flush_sram_skipped   __asm__("stat_flush_sram_skipped");
 
 void stat_record_unimpl(uint32_t raw, uint32_t pc);
 void stat_dump(void);

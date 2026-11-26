@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <cstdarg>
 #include <chrono>
+#include <time.h>
 
 #include <QDir>
 #include <QEventLoop>
@@ -182,7 +183,26 @@ void EmuThread::throttleTimerWait(unsigned int usec)
         nanosleep(&ts, nullptr);
         timeEndPeriod(10);
     #else
-        QThread::usleep(usec);
+        /* QThread::usleep/nanosleep can overshoot by ~1.5 ms on macOS, which
+         * costs ~15% of the 10 ms throttle interval. Sleep to just before the
+         * deadline and spin the short tail so the interval stays accurate. */
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::microseconds(usec);
+        for (;;) {
+            auto left = std::chrono::duration_cast<std::chrono::microseconds>(
+                deadline - std::chrono::steady_clock::now()).count();
+            if (left <= 0)
+                break;
+            if (left > 1500) {
+                long long sleep_us = left - 1000;
+                struct timespec ts{};
+                ts.tv_sec = sleep_us / 1000000;
+                ts.tv_nsec = (sleep_us % 1000000) * 1000;
+                while (nanosleep(&ts, &ts) == -1 && errno == EINTR) {}
+            } else {
+                while (std::chrono::steady_clock::now() < deadline)
+                    QThread::yieldCurrentThread();
+            }
+        }
     #endif
 }
 

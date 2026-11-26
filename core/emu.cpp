@@ -79,6 +79,17 @@ uint64_t stat_thumb_interp_insns   __asm__("stat_thumb_interp_insns");
 uint64_t stat_translation_entries  __asm__("stat_translation_entries");
 uint64_t stat_unimpl_total         __asm__("stat_unimpl_total");
 uint64_t stat_unimpl_by_key[STAT_UNIMP_KEYS] __asm__("stat_unimpl_by_key");
+uint64_t stat_write_action_calls   __asm__("stat_write_action_calls");
+uint64_t stat_write_action_invals  __asm__("stat_write_action_invals");
+uint64_t stat_flush_translations   __asm__("stat_flush_translations");
+uint64_t stat_translations_created __asm__("stat_translations_created");
+uint64_t stat_translation_insns    __asm__("stat_translation_insns");
+uint64_t stat_flush_ctrl           __asm__("stat_flush_ctrl");
+uint64_t stat_flush_ttb            __asm__("stat_flush_ttb");
+uint64_t stat_flush_domain         __asm__("stat_flush_domain");
+uint64_t stat_flush_cacheops       __asm__("stat_flush_cacheops");
+uint64_t stat_flush_debug          __asm__("stat_flush_debug");
+uint64_t stat_flush_sram_skipped   __asm__("stat_flush_sram_skipped");
 
 void stat_record_unimpl(uint32_t raw, uint32_t pc)
 {
@@ -106,6 +117,20 @@ void stat_dump()
     gui_debug_printf("  JIT entries  : %llu, unimpl events: %llu\n",
         static_cast<unsigned long long>(stat_translation_entries),
         static_cast<unsigned long long>(stat_unimpl_total));
+    gui_debug_printf("  Translated   : %llu blocks, %llu insns\n",
+        static_cast<unsigned long long>(stat_translations_created),
+        static_cast<unsigned long long>(stat_translation_insns));
+    gui_debug_printf("  write_action : %llu calls, %llu invalidations\n",
+        static_cast<unsigned long long>(stat_write_action_calls),
+        static_cast<unsigned long long>(stat_write_action_invals));
+    gui_debug_printf("  Full flushes : %llu (ctrl=%llu ttb=%llu domain=%llu cache=%llu debug=%llu sram-skip=%llu)\n",
+        static_cast<unsigned long long>(stat_flush_translations),
+        static_cast<unsigned long long>(stat_flush_ctrl),
+        static_cast<unsigned long long>(stat_flush_ttb),
+        static_cast<unsigned long long>(stat_flush_domain),
+        static_cast<unsigned long long>(stat_flush_cacheops),
+        static_cast<unsigned long long>(stat_flush_debug),
+        static_cast<unsigned long long>(stat_flush_sram_skipped));
 
     std::vector<unsigned> keys;
     for(unsigned k = 0; k < STAT_UNIMP_KEYS; ++k)

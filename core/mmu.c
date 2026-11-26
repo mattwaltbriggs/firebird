@@ -257,7 +257,7 @@ void *addr_cache_miss(uint32_t virt, bool writing, fault_proc *fault) {
     return ptr;
 }
 
-void addr_cache_flush() {
+static void addr_cache_flush_internal(bool flush_jit) {
     if (arm.control & 1) {
         void *table = phys_mem_ptr(arm.translation_table_base, 0x4000);
         if (!table)
@@ -270,5 +270,17 @@ void addr_cache_flush() {
         addr_cache_invalidate(offset);
     }
 
-    flush_translations();
+    if (flush_jit)
+        flush_translations();
+}
+
+void addr_cache_flush() {
+    addr_cache_flush_internal(true);
+}
+
+/* Cache/TLB maintenance does not modify guest code. Cached stores call
+   write_action(), which invalidates the affected translation when code really
+   changes, so there is no need to throw away the whole JIT here. */
+void addr_cache_flush_no_translate() {
+    addr_cache_flush_internal(false);
 }

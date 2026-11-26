@@ -19,6 +19,7 @@
 #include "mem.h"
 #include "debug.h"
 #include "translate.h"
+#include "translation_stats.h"
 #include "usb_cx2.h"
 #include "cx2.h"
 
@@ -70,6 +71,7 @@ SYSVABI void read_action(void *ptr) {
 SYSVABI void write_action(void *ptr) {
     uint32_t addr = phys_mem_addr(ptr);
     uint32_t *flags = &RAM_FLAGS((size_t)ptr & ~3);
+    STAT_INC(stat_write_action_calls);
     if (*flags & RF_WRITE_BREAKPOINT) {
         if (!gdb_connected)
             emuprintf("Hit write breakpoint at %08x. Entering debugger.\n", addr);
@@ -77,6 +79,7 @@ SYSVABI void write_action(void *ptr) {
     }
 #ifndef NO_TRANSLATION
     if (*flags & RF_CODE_TRANSLATED) {
+        STAT_INC(stat_write_action_invals);
         logprintf(LOG_CPU, "Wrote to translated code at %08x. Deleting translations.\n", addr);
         invalidate_translation(*flags >> RFS_TRANSLATION_INDEX);
     } else {

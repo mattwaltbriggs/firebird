@@ -847,6 +847,7 @@ void translate(uint32_t pc_start, uint32_t *insn_ptr_start)
 		}
 
 		RAM_FLAGS(insn_ptr) |= (RF_CODE_TRANSLATED | next_translation_index << RFS_TRANSLATION_INDEX);
+		STAT_INC(stat_translation_insns);
 
 		++jump_table_current;
 		++insn_ptr;
@@ -916,6 +917,7 @@ void translate(uint32_t pc_start, uint32_t *insn_ptr_start)
 	this_translation->unused = reinterpret_cast<uintptr_t>(translate_current);
 
 	next_translation_index += 1;
+	STAT_INC(stat_translations_created);
 
 	// Flush the instruction cache
 	#ifdef IS_IOS_BUILD
@@ -949,6 +951,7 @@ static void _invalidate_translation(int index)
 
 void flush_translations()
 {
+	STAT_INC(stat_flush_translations);
 	for(unsigned int index = 0; index < next_translation_index; index++)
 		_invalidate_translation(index);
 

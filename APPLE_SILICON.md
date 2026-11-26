@@ -29,10 +29,12 @@ open firebird-emu.app
 
 ## Experimental JIT branch
 
-The `experimental` branch adds optional profiling and three AArch64 JIT fixes:
+The `experimental` branch adds optional profiling, AArch64 JIT fixes and a
+throttling accuracy fix:
 
 - `TRANSLATION_STATS=true` qmake option reports JIT/interpreter instruction
-  counts and the most common untranslated ARM opcodes when emulation stops.
+  counts, translation/write-action/flush counts and the most common untranslated
+  ARM opcodes when emulation stops.
 - Non-S `UMULL`, `UMLAL`, `SMULL` and `SMLAL` are translated with AArch64
   `UMADDL`/`SMADDL`; S-flag variants still fall back to the interpreter.
   Note that ARM's long-multiply `U` bit is 1 for signed and 0 for unsigned.
@@ -42,6 +44,16 @@ The `experimental` branch adds optional profiling and three AArch64 JIT fixes:
   write-breakpoint and self-modifying-code handling on AArch64. Invalidating the
   currently executing block is allowed instead of raising an error, because
   cached stores can now trigger that path from inside JIT code.
+- CP15 cache/TLB maintenance and the Linux debug-override register no longer
+  discard every translation; they refresh the address cache only. MMU control,
+  translation-table and domain writes still perform a full flush. The cached
+  store hook handles real self-modifying code.
+- The flash-access workaround that ignores cache flushes from SRAM code is now
+  enabled for all builds, including those with `SUPPORT_LINUX`.
+- The macOS throttle wait sleeps to just before its deadline and spins the short
+  tail, instead of using `QThread::usleep()` directly. `QThread::usleep()` can
+  overshoot by about 1.5 ms per 10 ms interval, which showed up as ~83–87%
+  reported speed even when the emulator had spare capacity.
 
 Build the instrumented variant with:
 
