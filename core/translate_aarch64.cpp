@@ -28,6 +28,7 @@
 #include "mem.h"
 #include "mmu.h"
 #include "os/os.h"
+#include "translation_stats.h"
 
 #ifdef IS_IOS_BUILD
 #include <unistd.h>
@@ -296,11 +297,12 @@ void translate(uint32_t pc_start, uint32_t *insn_ptr_start)
 				   || i.mult.rn == PC || i.mult.rd == PC)
 					goto unimpl; // PC as register not implemented
 
-				if(i.mult.s)
-					goto unimpl; // setcc not implemented (not easily possible as no aarch64 instruction only changes n and z)
-
 				if ((i.raw & 0xFC000F0) == 0x0000090)
 				{
+					// MUL / MLA
+					if(i.mult.s)
+						goto unimpl; // MULS/MLAS: N/Z only, C/V unchanged
+
 					uint32_t instruction = 0x1B000000; // madd w0, w0, w0, w0
 
 					instruction |= (mapreg(i.mult.rs) << 16) | (mapreg(i.mult.rm) << 5) | mapreg(i.mult.rd);
@@ -313,7 +315,36 @@ void translate(uint32_t pc_start, uint32_t *insn_ptr_start)
 					goto instruction_translated;
 				}
 
-				goto unimpl; // UMULL, UMLAL, SMULL, SMLAL not implemented
+				if ((i.raw & 0xF8000F0) == 0x0800090)
+				{
+					// UMULL / UMLAL / SMULL / SMLAL: 32x32 -> 64
+					if(i.mult.s)
+						goto unimpl; // N/Z from 64-bit result; C/V unchanged
+					if(i.mult.rn == i.mult.rd)
+						goto unimpl; // RdLo == RdHi is unpredictable
+
+					// Ra and Rd are x0; sources are the mapped ARM registers.
+					uint32_t instruction = (i.mult.u ? 0x9BA00000 : 0x9B200000)
+					                     | (mapreg(i.mult.rm) << 16)
+					                     | (mapreg(i.mult.rs) << 5);
+					if(i.mult.a)
+					{
+						// Build the 64-bit accumulator RdHi:RdLo in x0.
+						emit_mov_reg(W0, mapreg(i.mult.rn));
+						emit_mov_reg(X21, mapreg(i.mult.rd));
+						emit(0xAA158000); // orr x0, x0, x21, lsl #32
+					}
+					else
+						instruction |= X31 << 10; // Ra = xzr
+
+					emit(instruction); // umaddl/smaddl x0, ...
+					emit_mov_reg(mapreg(i.mult.rn), W0); // RdLo
+					emit(0xD360FC00); // lsr x0, x0, #32
+					emit_mov_reg(mapreg(i.mult.rd), W0); // RdHi
+					goto instruction_translated;
+				}
+
+				goto unimpl; // SWP or undefined
 			}
 
 			if(i.mem_proc2.s || !i.mem_proc2.h)
@@ -393,12 +424,12 @@ void translate(uint32_t pc_start, uint32_t *insn_ptr_start)
 		else if((i.raw & 0xC000000) == 0x0000000)
 		{
 			// Data processing
-			if(!i.data_proc.imm && i.data_proc.reg_shift) // reg shift
-				goto unimpl;
+			const bool reg_shift = !i.data_proc.imm && i.data_proc.reg_shift;
 
 			if(i.data_proc.s
-			   && !(i.data_proc.op == OP_ADD || i.data_proc.op == OP_SUB
-			        || i.data_proc.op == OP_CMP || i.data_proc.op == OP_CMN))
+			   && (reg_shift
+			       || !(i.data_proc.op == OP_ADD || i.data_proc.op == OP_SUB
+			            || i.data_proc.op == OP_CMP || i.data_proc.op == OP_CMN)))
 			{
 				/* We can't translate the S-bit that easily,
 				   as the barrel shifter output does not influence
@@ -424,7 +455,7 @@ void translate(uint32_t pc_start, uint32_t *insn_ptr_start)
 			if(i.data_proc.op == OP_RSC || i.data_proc.op == OP_TEQ)
 				goto unimpl;
 
-			if(!i.data_proc.imm && i.data_proc.shift == SH_ROR)
+			if(!i.data_proc.imm && !reg_shift && i.data_proc.shift == SH_ROR)
 			{
 				if(i.data_proc.shift_imm == 0)
 					goto unimpl; // RRX (encoded as ror #0) is not supported anywhere
@@ -436,11 +467,12 @@ void translate(uint32_t pc_start, uint32_t *insn_ptr_start)
 
 			// Using pc is not supported
 			if(i.data_proc.rd == PC
-			   || (!i.data_proc.imm && i.data_proc.rm == PC))
+			   || (!i.data_proc.imm && i.data_proc.rm == PC)
+			   || (reg_shift && i.data_proc.rs == PC))
 				goto unimpl;
 
-			// AArch64 ADC and SBC do not support a shifted reg
-			if((i.data_proc.op == OP_ADC || i.data_proc.op == OP_SBC)
+			// AArch64 ADC and SBC do not support a shifted reg; materialize it first.
+			if(!reg_shift && (i.data_proc.op == OP_ADC || i.data_proc.op == OP_SBC)
 			   && (i.data_proc.shift != SH_LSL || i.data_proc.shift_imm != 0))
 				goto unimpl;
 
@@ -492,9 +524,54 @@ void translate(uint32_t pc_start, uint32_t *insn_ptr_start)
 
 			if(!i.data_proc.imm)
 			{
-				instruction |= mapreg(i.data_proc.rm) << 16;
-				instruction |= i.data_proc.shift << 22;
-				instruction |= i.data_proc.shift_imm << 10;
+				if(reg_shift)
+				{
+					// Materialize the ARM barrel-shifter result in w25. AArch64 has
+					// no register-shifted ALU operand. ARM uses Rs[7:0]: 0 means
+					// "no shift" and values >=32 saturate/zero for LSL/LSR/ASR.
+					const PReg wm = mapreg(i.data_proc.rm);
+					const PReg wrs = mapreg(i.data_proc.rs);
+					switch(i.data_proc.shift)
+					{
+					case SH_LSL:
+						emit(0xD53B4215); // mrs x21, nzcv (restore flags below)
+						emit(0x12001C00 | (wrs << 5)); // and w0, wRs, #0xff
+						emit(0x1AC02000 | (wm << 5) | W25); // lslv w25, wRm, w0
+						emit(0x7100801F); // cmp w0, #32
+						emit(0x1A9923F9); // csel w25, wzr, w25, hs
+						emit(0xD51B4215); // msr nzcv, x21
+						break;
+					case SH_LSR:
+						emit(0xD53B4215);
+						emit(0x12001C00 | (wrs << 5));
+						emit(0x1AC02400 | (wm << 5) | W25); // lsrv w25, wRm, w0
+						emit(0x7100801F);
+						emit(0x1A9923F9);
+						emit(0xD51B4215);
+						break;
+					case SH_ASR:
+						emit(0xD53B4215);
+						emit(0x12001C00 | (wrs << 5));
+						emit(0x71007C1F); // cmp w0, #31
+						emit(0x528003F9); // mov w25, #31
+						emit(0x1A802320); // csel w0, w25, w0, hs
+						emit(0x1AC02800 | (wm << 5) | W25); // asrv w25, wRm, w0
+						emit(0xD51B4215);
+						break;
+					case SH_ROR:
+						// rorv already uses Rs[4:0], which matches (Rs[7:0] % 32).
+						emit(0x1AC02C00 | (wrs << 16) | (wm << 5) | W25);
+						break;
+					}
+					instruction |= W25 << 16;
+					instruction |= SH_LSL << 22; // no additional shift
+				}
+				else
+				{
+					instruction |= mapreg(i.data_proc.rm) << 16;
+					instruction |= i.data_proc.shift << 22;
+					instruction |= i.data_proc.shift_imm << 10;
+				}
 			}
 			else
 			{
@@ -775,6 +852,7 @@ void translate(uint32_t pc_start, uint32_t *insn_ptr_start)
 	}
 
 	unimpl:
+	STAT_RECORD_UNIMPL(*insn_ptr, pc);
 	// Throw away partial translation
 	translate_current = *jump_table_current;
 	RAM_FLAGS(insn_ptr) |= RF_CODE_NO_TRANSLATE;
@@ -852,13 +930,15 @@ void translate(uint32_t pc_start, uint32_t *insn_ptr_start)
 
 static void _invalidate_translation(int index)
 {
-	/* Disabled for now. write_action not called in asmcode_aarch64.S so this can't happen
-	   and translation_pc_ptr is inaccurate due to translation_jmp anyway.
-
-	uint32_t flags = RAM_FLAGS(translation_pc_ptr);
-	if ((flags & RF_CODE_TRANSLATED) && (int)(flags >> RFS_TRANSLATION_INDEX) == index)
-		error("Cannot modify currently executing code block.");
-	*/
+	// Don't invalidate the block we're currently executing (x86_64 does the same).
+	uint32_t *cur = reinterpret_cast<uint32_t*>(try_ptr(arm.reg[15]));
+	if(cur)
+	{
+		uint32_t flags = RAM_FLAGS(cur);
+		if((flags & RF_CODE_TRANSLATED)
+		   && int(flags >> RFS_TRANSLATION_INDEX) == index)
+			error("Cannot modify currently executing code block.");
+	}
 
 	uint32_t *start = translation_table[index].start_ptr;
 	uint32_t *end   = translation_table[index].end_ptr;

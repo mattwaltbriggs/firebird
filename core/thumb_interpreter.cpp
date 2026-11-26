@@ -4,6 +4,7 @@
 #include "emu.h"
 #include "mem.h"
 #include "mmu.h"
+#include "translation_stats.h"
 
 static uint32_t shift(int type, uint32_t res, uint32_t count, int setcc) {
     //TODO: Verify!
@@ -102,6 +103,7 @@ void cpu_thumb_loop() {
 
         arm.reg[15] += 2;
         cycle_count_delta++;
+        STAT_INC(stat_thumb_interp_insns);
 
 #define CASE_x2(base) case base: case base+1
 #define CASE_x4(base) CASE_x2(base): CASE_x2(base+2)

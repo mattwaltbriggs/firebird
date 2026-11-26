@@ -1,8 +1,8 @@
 # Apple Silicon build notes
 
 This fork provides a native `arm64` build of Firebird Emu for Apple Silicon Macs.
-The upstream project already contains an AArch64 JIT backend, so no emulator source
-changes were required.
+The released build is upstream source unchanged apart from this document; the
+upstream project already contains an AArch64 JIT backend.
 
 ## Build
 
@@ -26,6 +26,26 @@ open firebird-emu.app
 `/opt/homebrew/opt/brotli/lib` and `/opt/homebrew/opt/webp/lib` into
 `firebird-emu.app/Contents/Frameworks` and adjust their install names with
 `install_name_tool` if you bundle the app yourself.
+
+## Experimental JIT branch
+
+The `experimental` branch adds optional profiling and three AArch64 JIT fixes:
+
+- `TRANSLATION_STATS=true` qmake option reports JIT/interpreter instruction
+  counts and the most common untranslated ARM opcodes when emulation stops.
+- Non-S `UMULL`, `UMLAL`, `SMULL` and `SMLAL` are translated with AArch64
+  `UMADDL`/`SMADDL`; S-flag variants still fall back to the interpreter.
+- Non-S register-shifted ARM data-processing instructions are translated by
+  materializing the barrel-shifter result first; S-flag variants still fall back.
+- Cached JIT stores now call `write_action()` when write flags are set, restoring
+  write-breakpoint and self-modifying-code handling on AArch64.
+
+Build the instrumented variant with:
+
+```bash
+/opt/homebrew/opt/qt@5/bin/qmake .. TRANSLATION_STATS=true
+make -j$(sysctl -n hw.ncpu)
+```
 
 ## Gatekeeper
 

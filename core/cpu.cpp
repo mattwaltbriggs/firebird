@@ -17,6 +17,7 @@
 #include "mem.h"
 #include "mmu.h"
 #include "translate.h"
+#include "translation_stats.h"
 
 // Global CPU state
 struct arm_state arm;
@@ -89,6 +90,7 @@ void cpu_arm_loop()
         // If the instruction is translated, use the translation
         if((~cpu_events & EVENT_DEBUG_STEP) && *flags_ptr & RF_CODE_TRANSLATED)
         {
+            STAT_INC(stat_translation_entries);
             #if TRANSLATION_ENTER_HAS_PTR
                 translation_enter(p);
             #else
@@ -102,6 +104,7 @@ void cpu_arm_loop()
 
         arm.reg[15] += 4; // Increment now to account for the pipeline
         ++cycle_count_delta;
+        STAT_INC(stat_arm_interp_insns);
         do_arm_instruction(*p);
     }
 }

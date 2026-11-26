@@ -6,6 +6,13 @@ DEFINES += FB_VERSION=1.6
 
 # JIT. Set to true, false or auto (default)
 isEmpty(TRANSLATION_ENABLED): TRANSLATION_ENABLED = auto
+
+# Optional execution/JIT-fallback instrumentation (off by default)
+isEmpty(TRANSLATION_STATS): TRANSLATION_STATS = false
+equals(TRANSLATION_STATS, true) {
+	DEFINES += TRANSLATION_STATS
+	message("TRANSLATION_STATS: enabled")
+}
 # More accurate, but slower. Set to true, false or auto (default)
 isEmpty(SUPPORT_LINUX) | equals(SUPPORT_LINUX, auto) {
 	SUPPORT_LINUX = true
@@ -239,6 +246,7 @@ HEADERS += \
     core/schedule.h \
     core/sha256.h \
     core/translate.h \
+    core/translation_stats.h \
     core/usb.h \
     core/usblink.h \
     core/usblink_queue.h \

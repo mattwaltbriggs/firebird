@@ -23,6 +23,15 @@ translation_sp: .global translation_sp
 .text
 .align 2
 
+// Mirrors MEM_MAXSIZE / RAM_FLAGS bits from mem.h
+#define MEM_MAXSIZE (65*1024*1024)
+#define RF_WRITE_BREAKPOINT  2
+#define RF_CODE_EXECUTED     16
+#define RF_CODE_TRANSLATED   32
+#define RF_CODE_NO_TRANSLATE 64
+#define DO_WRITE_ACTION (RF_WRITE_BREAKPOINT | RF_CODE_EXECUTED | \
+                         RF_CODE_TRANSLATED | RF_CODE_NO_TRANSLATE)
+
 .global data_abort
 
 translation_enter: .global translation_enter
@@ -96,6 +105,14 @@ translation_next_enter:
 	cmp w25, #0
 	bpl save_return // if(cycle_count_delta > 0) goto save_return;
 
+#ifdef TRANSLATION_STATS
+	// Count instructions in the block we are about to execute
+	loadsym x24, stat_arm_translated_insns
+	ldr x23, [x24]
+	add x23, x23, x21
+	str x23, [x24]
+#endif
+
 	msr nzcv, x17	
 	br x0
 
@@ -113,6 +130,13 @@ translation_jmp: .global translation_jmp
 	adds w25, w25, #4 // We don't know how much will be executed, so use a possible number
 	bpl save_return
 	str w25, [x24]
+
+#ifdef TRANSLATION_STATS
+	loadsym x24, stat_arm_translated_insns
+	ldr x23, [x24]
+	add x23, x23, #4
+	str x23, [x24]
+#endif
 
 	msr nzcv, x17
 
@@ -297,6 +321,16 @@ write_word_asm: .global write_word_asm
 0:	ldr x22, [x21, #8] // x22 = *(x21+1)
 	tbnz x22, #0, 1f
 	str w1, [x22, x0]
+
+	// Check RAM_FLAGS for write breakpoints / self-modifying code
+	mov x21, #MEM_MAXSIZE
+	add x23, x22, x0
+	bic x23, x23, #3
+	ldr w23, [x23, x21]
+	tbnz w23, #1, .Lwrite_action_slow // RF_WRITE_BREAKPOINT
+	tbnz w23, #4, .Lwrite_action_slow // RF_CODE_EXECUTED
+	tbnz w23, #5, .Lwrite_action_slow // RF_CODE_TRANSLATED
+	tbnz w23, #6, .Lwrite_action_slow // RF_CODE_NO_TRANSLATE
 	ret
 
 // Not cached
@@ -334,6 +368,15 @@ write_half_asm: .global write_half_asm
 0:	ldr x22, [x21, #8] // x22 = *(x21+1)
 	tbnz x22, #0, 1f
 	strh w1, [x22, x0]
+
+	mov x21, #MEM_MAXSIZE
+	add x23, x22, x0
+	bic x23, x23, #3
+	ldr w23, [x23, x21]
+	tbnz w23, #1, .Lwrite_action_slow
+	tbnz w23, #4, .Lwrite_action_slow
+	tbnz w23, #5, .Lwrite_action_slow
+	tbnz w23, #6, .Lwrite_action_slow
 	ret
 
 // Not cached
@@ -370,6 +413,15 @@ write_byte_asm: .global write_byte_asm
 0:	ldr x22, [x21, #8] // x22 = *(x21+1)
 	tbnz x22, #0, 1f
 	strb w1, [x22, x0]
+
+	mov x21, #MEM_MAXSIZE
+	add x23, x22, x0
+	bic x23, x23, #3
+	ldr w23, [x23, x21]
+	tbnz w23, #1, .Lwrite_action_slow
+	tbnz w23, #4, .Lwrite_action_slow
+	tbnz w23, #5, .Lwrite_action_slow
+	tbnz w23, #6, .Lwrite_action_slow
 	ret
 
 // Not cached
@@ -399,3 +451,16 @@ write_byte_asm: .global write_byte_asm
 	ldp x30, x23, [sp], #16
 	msr nzcv, x17	
 	b 0b // Try again
+
+// Slow path for cached stores that need write_action().
+// x22 = addr cache base, x0 = guest address.
+.Lwrite_action_slow:
+	mrs x17, nzcv
+	add x0, x22, x0
+	stp x30, x23, [sp, #-16]!
+	bl save_virt
+	bl write_action
+	bl load_virt
+	msr nzcv, x17
+	ldp x30, x23, [sp], #16
+	ret

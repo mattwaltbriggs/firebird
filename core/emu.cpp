@@ -19,6 +19,11 @@
 #include "schedule.h"
 #include "misc.h"
 #include "mem.h"
+#include "translation_stats.h"
+
+#ifdef TRANSLATION_STATS
+#include <vector>
+#endif
 
 /* cycle_count_delta is a (usually negative) number telling what the time is relative
  * to the next scheduled event. See sched.c */
@@ -66,6 +71,58 @@ void logprintf(int type, const char *str, ...) {
         va_end(va);
     }
 }
+
+#ifdef TRANSLATION_STATS
+uint64_t stat_arm_translated_insns __asm__("stat_arm_translated_insns");
+uint64_t stat_arm_interp_insns     __asm__("stat_arm_interp_insns");
+uint64_t stat_thumb_interp_insns   __asm__("stat_thumb_interp_insns");
+uint64_t stat_translation_entries  __asm__("stat_translation_entries");
+uint64_t stat_unimpl_total         __asm__("stat_unimpl_total");
+uint64_t stat_unimpl_by_key[STAT_UNIMP_KEYS] __asm__("stat_unimpl_by_key");
+
+void stat_record_unimpl(uint32_t raw, uint32_t pc)
+{
+    unsigned key = (raw >> 20) & (STAT_UNIMP_KEYS - 1);
+    ++stat_unimpl_total;
+    ++stat_unimpl_by_key[key];
+    (void)pc;
+}
+
+void stat_dump()
+{
+    uint64_t total = stat_arm_translated_insns + stat_arm_interp_insns
+                   + stat_thumb_interp_insns;
+    auto pct = [total](uint64_t n) -> double {
+        return total ? 100.0 * static_cast<double>(n) / static_cast<double>(total) : 0.0;
+    };
+
+    gui_debug_printf("Translation stats: total=%llu\n", static_cast<unsigned long long>(total));
+    gui_debug_printf("  JIT ARM      : %llu (%.2f%%)\n",
+        static_cast<unsigned long long>(stat_arm_translated_insns), pct(stat_arm_translated_insns));
+    gui_debug_printf("  ARM interp   : %llu (%.2f%%)\n",
+        static_cast<unsigned long long>(stat_arm_interp_insns), pct(stat_arm_interp_insns));
+    gui_debug_printf("  Thumb interp : %llu (%.2f%%)\n",
+        static_cast<unsigned long long>(stat_thumb_interp_insns), pct(stat_thumb_interp_insns));
+    gui_debug_printf("  JIT entries  : %llu, unimpl events: %llu\n",
+        static_cast<unsigned long long>(stat_translation_entries),
+        static_cast<unsigned long long>(stat_unimpl_total));
+
+    std::vector<unsigned> keys;
+    for(unsigned k = 0; k < STAT_UNIMP_KEYS; ++k)
+        if(stat_unimpl_by_key[k])
+            keys.push_back(k);
+
+    std::sort(keys.begin(), keys.end(), [](unsigned a, unsigned b) {
+        return stat_unimpl_by_key[a] > stat_unimpl_by_key[b];
+    });
+
+    for(size_t i = 0; i < keys.size() && i < 20; ++i) {
+        unsigned k = keys[i];
+        gui_debug_printf("  unimpl key %03x: %llu\n", k,
+                         static_cast<unsigned long long>(stat_unimpl_by_key[k]));
+    }
+}
+#endif
 
 void emuprintf(const char *format, ...) {
     va_list va;
@@ -380,6 +437,8 @@ void emu_loop(bool reset)
                 cpu_arm_loop();
         }
     }
+
+    STAT_DUMP();
 
     #if OS_HAS_PAGEFAULT_HANDLER
         os_faulthandler_unarm(&seh_frame);

@@ -80,6 +80,7 @@ union Instruction {
 
     union {
         BitField<23> l;
+        BitField<22> u; // unsigned for long multiplies (B for SWP)
         BitField<21> a;
         BitField<20> s;
 
