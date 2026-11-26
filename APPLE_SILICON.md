@@ -62,6 +62,15 @@ Build the instrumented variant with:
 make -j$(sysctl -n hw.ncpu)
 ```
 
+## Release 1.7
+
+The `arm64-1.7` release contains the fixes listed above. The DMG is
+`firebird-emu-1.7-arm64.dmg` and its SHA-256 is:
+
+```
+677a08e2991ab8b69e615406c596aa654a52b2858421499321af0428e61c7db0
+```
+
 ## Gatekeeper
 
 The released DMG is ad-hoc signed but not notarized, so macOS may block it on
